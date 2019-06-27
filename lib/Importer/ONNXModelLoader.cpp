@@ -1085,40 +1085,11 @@ ONNXModelLoader::loadConstantOfShape(const ONNX_NAMESPACE::NodeProto &op,
   return llvm::Error::success();
 }
 
-llvm::Error ONNXModelLoader::loadTile(const ONNX_NAMESPACE::NodeProto &op,
-                                      const ArgumentDictionaryTy &dict) {
-  const std::string &opName = loadOperatorName(op);
-  NodeValue in, repeats;
-  ASSIGN_VALUE_OR_RETURN_ERR(in, getNodeValueByName(op.input(0)));
-  ASSIGN_VALUE_OR_RETURN_ERR(repeats, getNodeValueByName(op.input(1)));
-  if (!llvm::isa<Constant>(repeats)) {
-    RETURN_ERR("Only constant Repeats is supported!");
-  }
-
-  if (repeats.dims().size() != 1) {
-    RETURN_ERR("Repeats must be a single-dimensional tensor!");
-  }
-
-  if (repeats.dims()[0] != in.dims().size()) {
-    RETURN_ERR("Repeats should have one value for each dimension of input!");
-  }
-  auto rh = llvm::cast<Constant>(repeats)->getPayload().getHandle<int64_t>();
-  Node *N = in;
-  for (size_t i = 0; i < in.dims().size(); i++) {
-    auto tiles = rh.raw(i);
-    if (tiles != 1) {
-      std::string name = opName + "." + std::to_string(i);
-      N = G_.createTile(name, N, tiles, /*axis*/ i);
-    }
-  }
-
-  RETURN_IF_ERR(addNodeAsOutput(op, N));
-  return llvm::Error::success();
-}
-
 llvm::Error ONNXModelLoader::loadOperator(const ONNX_NAMESPACE::NodeProto &op) {
   ArgumentDictionaryTy dict = loadArgumentMap(op);
   const std::string &typeName = op.op_type();
+  
+  printf("%s %d : opname %s\n",__func__,__LINE__,typeName.c_str());
 
   // Check if operator is supported in parent class, CommonOperatorLoader.
   bool tryLoadCommonOperatorResult;
@@ -1182,9 +1153,6 @@ llvm::Error ONNXModelLoader::loadOperator(const ONNX_NAMESPACE::NodeProto &op) {
   if (typeName == "ConstantOfShape") {
     return loadConstantOfShape(op, dict);
   }
-  if (typeName == "Tile") {
-    return loadTile(op, dict);
-  }
 
   RETURN_ERR("Failed to load operator.",
              GlowErr::ErrorCode::MODEL_LOADER_UNSUPPORTED_OPERATOR);
@@ -1218,6 +1186,7 @@ llvm::Error ONNXModelLoader::setOutputNodes(ONNX_NAMESPACE::GraphProto &net) {
 
 llvm::Error ONNXModelLoader::loadNetwork(ONNX_NAMESPACE::GraphProto &net) {
   /// Load the network operators:
+  printf("%s %d net.node_size %d\n",__func__,__LINE__,net.node_size());
   for (int i = 0; i < net.node_size(); i++) {
     auto &op = net.node(i);
     RETURN_IF_ERR(loadOperator(op));
@@ -1240,7 +1209,8 @@ ONNXModelLoader::checkInputs(ONNX_NAMESPACE::GraphProto &net,
     for (int j = 0; j < net.input_size(); j++) {
       const ONNX_NAMESPACE::ValueInfoProto &valueInfo = net.input(j);
       const std::string &inputName = valueInfo.name();
-
+	  printf("%s %s %d:inputname %s tensorname %s\n",
+	  		__FILE__,__func__,__LINE__,inputName.c_str(),tensorNames[i]);
       if (inputName != tensorNames[i]) {
         continue;
       }
@@ -1249,15 +1219,19 @@ ONNXModelLoader::checkInputs(ONNX_NAMESPACE::GraphProto &net,
       const ONNX_NAMESPACE::TensorShapeProto &shape =
           valueInfo.type().tensor_type().shape();
       (void)shape;
-
+	  printf("%s %s %d: dim.size %d shape.dimsize %d\n",__FILE__,__func__,__LINE__,
+	  				(int)dims.size(),(int)shape.dim_size());
       // Check if the number of dimensions is consistent.
       RETURN_ERR_IF_NOT(dims.size() == (size_t)shape.dim_size(),
                         "Mismatch between input image and ONNX input shape");
       // Allow batch dimensions to be different.
       for (size_t k = 1; k < dims.size(); k++) {
+	  	printf("%s %s %d: dim[%d] %d shape.dimvalue %d\n",__FILE__,__func__,__LINE__,
+					k,(int)dims[k],(int)shape.dim(k).dim_value());
         RETURN_ERR_IF_NOT(dims[k] == (size_t)shape.dim(k).dim_value(),
                           "Mismatch between input image and ONNX input shape");
       }
+	  printf("dim[0] %d \n",(int)dims[0]);
     }
   }
   return llvm::Error::success();
@@ -1281,20 +1255,26 @@ ONNXModelLoader::ONNXModelLoader(const std::string &modelDescFilename,
     ASSIGN_VALUE_OR_RETURN_ERR(modelDef, loadProto(modelDescFilename));
 
     RETURN_IF_ERR(setVersion(modelDef));
+	printf("%s %d:parse the onnx model file correctlly\n",__func__,__LINE__);
 
     ONNX_NAMESPACE::GraphProto graphDef = modelDef.graph();
     RETURN_IF_ERR(checkInputs(graphDef, tensorNames, types));
 
     RETURN_IF_ERR(loadInitializers(graphDef));
+	printf("%s %d: input %s\n\r",__func__,__LINE__,tensorNames[0]);
 
     if (tensorNames.empty() && types.empty()) {
       // Detect inputs without initializers and create placeholders.
+      printf("%s %d\n",__func__,__LINE__);
       RETURN_IF_ERR(loadInputs(graphDef, /* loadInputsAsPlaceholders */ true));
     }
+	printf("%s %d\n",__func__,__LINE__);
 
     RETURN_IF_ERR(loadNetwork(graphDef));
+	printf("%s %d\n",__func__,__LINE__);
 
     RETURN_IF_ERR(setOutputNodes(graphDef));
+	printf("%s %d\n",__func__,__LINE__);
 
     RETURN_ERR_IF_NOT(F.verify(), "Function verification failed.");
 

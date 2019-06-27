@@ -37,6 +37,8 @@
 #include <queue>
 #include <sstream>
 #include <thread>
+#include <string>
+#include <iostream>
 
 using namespace glow;
 
@@ -130,6 +132,12 @@ llvm::cl::list<unsigned> expectedMatchingLabels(
     llvm::cl::desc("The comma delimited list of the matching lables"),
     llvm::cl::value_desc("int"), llvm::cl::ZeroOrMore, llvm::cl::CommaSeparated,
     llvm::cl::cat(imageLoaderCat));
+llvm::cl::opt<std::string> inputimagetype(
+    "input-image-type",
+    llvm::cl::desc("The type of input image."),
+    llvm::cl::value_desc("string_name"), llvm::cl::Required,
+    llvm::cl::Optional, llvm::cl::init("png"), llvm::cl::cat(imageLoaderCat));
+
 } // namespace
 
 /// Write a prompt to stdout asking for filenames for classification. Read in
@@ -191,6 +199,7 @@ createProtobufLoader(Loader &loader, TypeRef inputImageType) {
         loader.getCaffe2NetDescFilename(), loader.getCaffe2NetWeightFilename(),
         {inputName}, {inputImageType}, *loader.getFunction()));
   } else {
+  	printf("%s %d:  get the onnx modle\n",__func__,__LINE__);
     LD.reset(new ONNXModelLoader(loader.getOnnxModelFilename(), {inputName},
                                  {inputImageType}, *loader.getFunction()));
   }
@@ -477,12 +486,13 @@ setupContextPool(Placeholder *outputPH, Placeholder *inputImagePH,
   }
   return contexts;
 }
-
+std::string inputimagetypevar;
 int main(int argc, char **argv) {
   // Verify/initialize command line parameters, and then loader initializes
   // the ExecutionEngine and Function.
   parseCommandLine(argc, argv);
-
+  inputimagetypevar = inputimagetype;
+  printf("preprocess filename %s\n",inputimagetypevar.c_str());
   if (inputImageListFile.empty() && inputImageFilenames.size() == 0) {
     llvm::errs() << "Args: Either positional inputImageFilenames or "
                     "-inputImageListFile "
@@ -550,6 +560,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> inputImageBatchFilenames;
     if ((!miniBatchMode) && (!streamInputFilenamesMode)) {
       inputImageBatchFilenames = inputImageFilenames;
+	  printf("imageclassfier main filename %s\n",inputImageFilenames[0].c_str());
     }
 
     while ((streamInputFilenamesMode &&
@@ -561,7 +572,6 @@ int main(int argc, char **argv) {
       // Load and process the image data into the inputImageData Tensor.
       loadImagesAndPreprocess(inputImageBatchFilenames, &inputImageData,
                               imageNormMode, imageChannelOrder, imageLayout);
-
       // It we are benchmarking reset the image data to the batch size we need.
       if (iterationsOpt) {
         ShapeVector imageSize(inputImageData.getType().dims().begin(),
@@ -587,6 +597,7 @@ int main(int argc, char **argv) {
         // If in bundle mode, the bundle has been saved by the above call, so we
         // can safely return.
         if (emittingBundle()) {
+		  printf("return from imageclassfier\n");
           return;
         }
 

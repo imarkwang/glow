@@ -28,11 +28,15 @@ bool isArrayConstant(llvm::ArrayRef<size_t> a) {
 }
 
 Constant *ProtobufLoader::getConstantByNameOrNull(llvm::StringRef name) const {
+  
   auto it = nodeValueByName_.find(name);
   if (it == nodeValueByName_.end()) {
+  	printf("%s %s %d:not found %s \n",__FILE__,__func__,__LINE__,name);
     return nullptr;
   }
-  auto *res = llvm::dyn_cast<Constant>(it->second.getNode());
+  Node *nodetemp = it->second.getNode();
+  printf("%s %s %d:search %s nodetemp 0x%x\n",__FILE__,__func__,__LINE__,name,nodetemp);
+  auto *res = llvm::dyn_cast<Constant>(nodetemp);
   return res ? res : nullptr;
 }
 
@@ -80,12 +84,16 @@ ProtobufLoader::getNodeValueByName(llvm::StringRef name) const {
 llvm::Error ProtobufLoader::createAndRegisterConstant(llvm::StringRef name,
                                                       Tensor &&tensor) {
   auto it = nodeValueByName_.find(name);
+  
   if (it != nodeValueByName_.end()) {
     if (llvm::dyn_cast<Placeholder>(it->second.getNode())) {
       // Placeholders take precedence over Constants.
+      printf("%s %s %d:found %s \n",__FILE__,__func__,__LINE__,name);
       return llvm::Error::success();
     }
+	printf("%s %s %d:found not placeholder %s \n",__FILE__,__func__,__LINE__,name);
   }
+  printf("%s %s %d:search %s nope to create \n",__FILE__,__func__,__LINE__,name);
   // Note: We do not support training from models loaded from protos, so
   // trainable is always set to false here.
   Constant *node = G_.getParent()->createConstant(name, std::move(tensor));

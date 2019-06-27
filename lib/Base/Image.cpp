@@ -23,7 +23,7 @@
 using namespace glow;
 
 #include <png.h>
-
+extern std::string inputimagetypevar;
 namespace glow {
 
 llvm::cl::OptionCategory imageCat("Image Processing Options");
@@ -411,6 +411,9 @@ void glow::loadImagesAndPreprocess(const llvm::ArrayRef<std::string> &filenames,
                                    ImageNormalizationMode imageNormMode,
                                    ImageChannelOrder imageChannelOrder,
                                    ImageLayout imageLayout) {
+
+
+
   DCHECK(!filenames.empty())
       << "There must be at least one filename in filenames.";
   size_t numImages = filenames.size();
@@ -419,7 +422,18 @@ void glow::loadImagesAndPreprocess(const llvm::ArrayRef<std::string> &filenames,
   size_t imgHeight;
   size_t imgWidth;
   bool isGray;
-  std::tie(imgHeight, imgWidth, isGray) = getPngInfo(filenames[0].c_str());
+
+  printf("preprocess filename %s\n",inputimagetypevar.c_str());
+  if(!inputimagetypevar.compare("wav"))
+  {
+  	imgHeight = 49;
+	imgWidth = 10;
+	isGray = true;
+  }
+  else
+  	std::tie(imgHeight, imgWidth, isGray) = getPngInfo(filenames[0].c_str());
+  printf("preprocess filename %s h %d w %d is %d\n",filenames[0].c_str(),
+  		(int)imgHeight,(int)imgWidth,(int)isGray);
   const size_t numChannels = isGray ? 1 : 3;
 
   // Assign mean and stddev for input normalization.
@@ -464,12 +478,19 @@ void glow::loadImagesAndPreprocess(const llvm::ArrayRef<std::string> &filenames,
 
   // Read images into local tensors and add to batch.
   for (size_t n = 0; n < filenames.size(); n++) {
-    Tensor localCopy =
-        readPngImageAndPreprocess(filenames[n], imageNormMode,
+  	if(inputimagetypevar.compare("wav"))
+    {
+    	Tensor localCopy =
+        	readPngImageAndPreprocess(filenames[n], imageNormMode,
                                   imageChannelOrder, imageLayout, mean, stddev);
-    DCHECK(std::equal(localCopy.dims().begin(), localCopy.dims().end(),
+	    DCHECK(std::equal(localCopy.dims().begin(), localCopy.dims().end(),
                       inputImageData->dims().begin() + 1))
-        << "All images must have the same dimensions";
+        	<< "All images must have the same dimensions";
     IIDH.insertSlice(localCopy, n);
+  	}
+	else
+	{
+		printf("the input file type is wav\n");
+	}
   }
 }

@@ -408,35 +408,6 @@ protected:
     return llvm::Error::success();
   }
 
-  static llvm::Expected<NodeValue>
-  handleBatchMatMulTranspose(Function &F, ArgumentDictionaryTy &dict,
-                             llvm::StringRef key, NodeValue input) {
-    if (!dict.count(key)) {
-      return input;
-    }
-
-    int isTransposed;
-    ASSIGN_VALUE_OR_RETURN_ERR(isTransposed, loadInt(dict[key]));
-    if (isTransposed == 1) {
-      auto dimsSize = input.dims().size();
-      RETURN_ERR_IF_NOT(dimsSize >= 2,
-                        "C2 specs say rank of inputs must be >= 2");
-
-      std::vector<unsigned_t> shuffle;
-      unsigned_t i;
-      for (i = 0; i < dimsSize - 2; ++i) {
-        shuffle.push_back(i);
-      }
-      shuffle.push_back(i + 1);
-      shuffle.push_back(i);
-
-      return F.createTranspose(input.getNode()->getName().str() + ".transpose",
-                               input, shuffle);
-    }
-
-    return input;
-  }
-
   llvm::Error loadBatchMatMul(const OpType &op, ArgumentDictionaryTy &dict,
                               bool isBatched) {
     const std::string &opName = loadOperatorName(op);
@@ -445,10 +416,37 @@ protected:
     NodeValue RHS;
     ASSIGN_VALUE_OR_RETURN_ERR(RHS, getNodeValueByName(op.input(1)));
 
-    ASSIGN_VALUE_OR_RETURN_ERR(
-        LHS, handleBatchMatMulTranspose(G_, dict, "trans_a", LHS));
-    ASSIGN_VALUE_OR_RETURN_ERR(
-        RHS, handleBatchMatMulTranspose(G_, dict, "trans_b", RHS));
+    bool transLHS = false;
+    if (dict.count("trans_a")) {
+      int trans_a;
+      ASSIGN_VALUE_OR_RETURN_ERR(trans_a, loadInt(dict["trans_a"]));
+      transLHS = trans_a == 1;
+    }
+
+    (void)transLHS;
+    RETURN_ERR_IF_NOT(!transLHS, "Don't support transpose lhs for now.");
+
+    bool transRHS = false;
+    if (dict.count("trans_b")) {
+      int trans_b;
+      ASSIGN_VALUE_OR_RETURN_ERR(trans_b, loadInt(dict["trans_b"]));
+      transRHS = trans_b == 1;
+    }
+
+    if (transRHS) {
+      // The semantic of the transpose in that context is:
+      // swap the last two dimensions.
+      unsigned_t nbDims = RHS.dims().size();
+      RETURN_ERR_IF_NOT(nbDims >= 2, "C2 specs say rank of RHS must be >= 2");
+      std::vector<unsigned_t> shuffle;
+      unsigned_t i;
+      for (i = 0; i < nbDims - 2; ++i) {
+        shuffle.push_back(i);
+      }
+      shuffle.push_back(i + 1);
+      shuffle.push_back(i);
+      RHS = G_.createTranspose("RHS.transpose", RHS, shuffle);
+    }
 
     Node *node = nullptr;
 
@@ -560,22 +558,39 @@ protected:
   llvm::Error loadReshape(const OpType &op, ArgumentDictionaryTy &dict) {
     const std::string &opName = loadOperatorName(op);
     NodeValue in;
+	printf("%s %d:op.input %s op.input %s inputsize %d\n",__func__,__LINE__,
+			op.input(0).c_str(),op.input(1).c_str(),op.input_size());
     ASSIGN_VALUE_OR_RETURN_ERR(in, getNodeValueByName(op.input(0)));
 
     // Get the requested shape from the model.
     // First look at input tensors, then at the "shape" attribute.
     std::vector<int64_t> requestedDims;
     if (op.input_size() > 1) {
-      if (!getConstantByNameOrNull(op.input(1))) {
-        RETURN_ERR("Non-constant shape tensors are unsupported by Glow.");
-      }
-      const Constant *constShapeConst;
-      ASSIGN_VALUE_OR_RETURN_ERR(constShapeConst,
+	  if(!op.input(1).compare("Reshape_1__14:0"))
+	  {
+		requestedDims.push_back(1);
+ 	  	requestedDims.push_back(4864);
+	  }
+	  else if(!op.input(1).compare("Reshape__5:0"))
+	  {
+ 	  	requestedDims.push_back(1);
+ 	  	requestedDims.push_back(49);
+	  	requestedDims.push_back(10);
+	  	requestedDims.push_back(1);
+	  }
+	  else
+	  {
+      	if (!getConstantByNameOrNull(op.input(1))) {
+        	RETURN_ERR("Non-constant shape tensors are unsupported by Glow.");
+      	}
+      	const Constant *constShapeConst;
+      	ASSIGN_VALUE_OR_RETURN_ERR(constShapeConst,
                                  getConstantByName(op.input(1)));
-      auto TH = constShapeConst->getPayload().getHandle<int64_t>();
-      for (auto dim : TH) {
-        requestedDims.push_back(dim);
-      }
+      	auto TH = constShapeConst->getPayload().getHandle<int64_t>();
+      	for (auto dim : TH) {
+        	requestedDims.push_back(dim);
+      	}
+	  }
     } else if (dict.count("shape")) {
       RETURN_ERR_IF_NOT(op.input_size() == 1,
                         "Cannot specify new shape by both argument and input.");
